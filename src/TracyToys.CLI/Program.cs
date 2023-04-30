@@ -35,27 +35,28 @@ void Tif2Tiles(string tifFile, string outputDir, int minZoom, int maxZoom)
 {
     string tmpFile = "data\\temp.tif";
 
-    using var srcDs = Gdal.Open(tifFile, Access.GA_ReadOnly);
-    double[] srcGeoTransform = new double[6];
-    srcDs.GetGeoTransform(srcGeoTransform);
-    if (srcDs == null)
-    {
-        throw new FileNotFoundException();
-    }
-    // 1. 影像重投影到web墨卡托
-    var spatialReference = new SpatialReference("");
-    spatialReference.ImportFromEPSG(WEB_MERCATOR_EPSG_CODE);
-    spatialReference.ExportToWkt(out string wkt, null);
+    //using var srcDs = Gdal.Open(tifFile, Access.GA_ReadOnly);
+    //double[] srcGeoTransform = new double[6];
+    //srcDs.GetGeoTransform(srcGeoTransform);
+    //if (srcDs == null)
+    //{
+    //    throw new FileNotFoundException();
+    //}
+    //// 1. 影像重投影到web墨卡托
+    //var spatialReference = new SpatialReference("");
+    //spatialReference.ImportFromEPSG(WEB_MERCATOR_EPSG_CODE);
+    //spatialReference.ExportToWkt(out string wkt, null);
 
-    var srcSr = new SpatialReference("");
-    srcSr.ImportFromEPSG(4528);
-    srcSr.SetTM(0, 120, 1, 500000, 0);
-    srcSr.ExportToWkt(out var srcWkt, null);
+    //var srcSr = new SpatialReference("");
+    //srcSr.ImportFromEPSG(4528);
+    //srcSr.SetTM(0, 120, 1, 500000, 0);
+    //srcSr.ExportToWkt(out var srcWkt, null);
 
-    if (File.Exists(tmpFile))
-        File.Delete(tmpFile);
-    var options = Gdal.ParseCommandLine($"-t_srs EPSG:3857 -r near -of GTiff");
-    Gdal.Warp(tmpFile, new[] { srcDs }, new GDALWarpAppOptions(options), null, null);
+    //if (File.Exists(tmpFile))
+    //    File.Delete(tmpFile);
+    //var options = Gdal.ParseCommandLine($"-t_srs EPSG:3857 -r near -of GTiff");
+    //Gdal.Warp(tmpFile, new[] { srcDs }, new GDALWarpAppOptions(options), null, null);
+
     var dataset = Gdal.Open(tmpFile, Access.GA_ReadOnly);
 
     try
@@ -70,10 +71,10 @@ void Tif2Tiles(string tifFile, string outputDir, int minZoom, int maxZoom)
         int xSize = dataset.RasterXSize;
         int ySize = dataset.RasterYSize;
         // 计算经纬度范围
-        double lngMin = geoTransform[0];
-        double latMax = geoTransform[3];
-        double lngMax = lngMin + (xSize * geoTransform[1]) + (ySize * geoTransform[2]);
-        double latMin = latMax + (xSize * geoTransform[4]) + (ySize * geoTransform[5]);
+        var xMin = geoTransform[0];
+        var yMax = geoTransform[3];
+        var xMax = xMin + (xSize * geoTransform[1]) + (ySize * geoTransform[2]);
+        var yMin = yMax + (xSize * geoTransform[4]) + (ySize * geoTransform[5]);
         // EPSG:3857 坐标转Wgs84经纬度
         var sourceCRS = new SpatialReference("");
         sourceCRS.ImportFromEPSG(WEB_MERCATOR_EPSG_CODE);
@@ -82,14 +83,14 @@ void Tif2Tiles(string tifFile, string outputDir, int minZoom, int maxZoom)
         targetCRS.ImportFromEPSG(WGS_84_EGPS_CODE);
 
         var transform = new CoordinateTransformation(sourceCRS, targetCRS);
-        var lats = new double[] { latMin, latMax };
-        var lngs = new double[] { lngMin, lngMax };
-        transform.TransformPoints(2, lngs, lats, new double[] { 0, 0 });
+        var lngs = new double[] { yMin, yMax };
+        var lats = new double[] { xMin, xMax };
+        transform.TransformPoints(2, lats, lngs, new double[] { 0, 0 });
 
-        lngMax = lngs[1];
-        latMax = lats[1];
-        lngMin = lngs[0];
-        latMin = lats[0];
+        var lngMax = lngs[1];
+        var latMax = lats[1];
+        var lngMin = lngs[0];
+        var latMin = lats[0];
         // 原始图像东西方向像素分辨率
         double srcWePixelResolution = (lngMax - lngMin) / xSize;
         // 原始图像南北方向像素分辨率
