@@ -1,7 +1,10 @@
 ﻿// See https://aka.ms/new-console-template for more information
 
+using MaxRev.Gdal.Core;
 using OSGeo.GDAL;
 using OSGeo.OSR;
+using System;
+using System.Runtime.CompilerServices;
 
 /**
      * 瓦片大小
@@ -15,6 +18,11 @@ int WEB_MERCATOR_EPSG_CODE = 3857;
  * Wgs84 EPSG 编码
  */
 int WGS_84_EGPS_CODE = 4326;
+
+GdalBase.ConfigureAll();
+
+Tif2Tiles("G:\\demo\\3=tdom-f.tif", "data", 10, 18);
+
 /**
  * Tif 切片
  *
@@ -25,21 +33,31 @@ int WGS_84_EGPS_CODE = 4326;
  */
 void Tif2Tiles(string tifFile, string outputDir, int minZoom, int maxZoom)
 {
-    var srcDs = Gdal.Open(tifFile, Access.GA_ReadOnly);
+    string tmpFile = "data\\temp.tif";
+
+    using var srcDs = Gdal.Open(tifFile, Access.GA_ReadOnly);
+    double[] srcGeoTransform = new double[6];
+    srcDs.GetGeoTransform(srcGeoTransform);
     if (srcDs == null)
     {
         throw new FileNotFoundException();
     }
     // 1. 影像重投影到web墨卡托
-    string tmpFile = "";
     var spatialReference = new SpatialReference("");
     spatialReference.ImportFromEPSG(WEB_MERCATOR_EPSG_CODE);
-
     spatialReference.ExportToWkt(out string wkt, null);
-    Dataset webMercatorDs = Gdal.AutoCreateWarpedVRT(srcDs, null, wkt, ResampleAlg.GRA_Bilinear, 0);
-    Dataset dataset = Gdal.GetDriverByName("GTiff").CreateCopy(tmpFile, webMercatorDs, 0, null, null, null);
-    srcDs.Dispose();
-    webMercatorDs.Dispose();
+
+    var srcSr = new SpatialReference("");
+    srcSr.ImportFromEPSG(4528);
+    srcSr.SetTM(0, 120, 1, 500000, 0);
+    srcSr.ExportToWkt(out var srcWkt, null);
+
+    if (File.Exists(tmpFile))
+        File.Delete(tmpFile);
+    var options = Gdal.ParseCommandLine($"-t_srs EPSG:3857 -r near -of GTiff");
+    Gdal.Warp(tmpFile, new[] { srcDs }, new GDALWarpAppOptions(options), null, null);
+    var dataset = Gdal.Open(tmpFile, Access.GA_ReadOnly);
+
     try
     {
         // 2. 获取遥感影像经纬度范围，计算遥感影像像素分辨率
@@ -66,7 +84,7 @@ void Tif2Tiles(string tifFile, string outputDir, int minZoom, int maxZoom)
         var transform = new CoordinateTransformation(sourceCRS, targetCRS);
         var lats = new double[] { latMin, latMax };
         var lngs = new double[] { lngMin, lngMax };
-        transform.TransformPoints(2, lats, lngs, new double[] { 0, 0 });
+        transform.TransformPoints(2, lngs, lats, new double[] { 0, 0 });
 
         lngMax = lngs[1];
         latMax = lats[1];
@@ -122,22 +140,22 @@ void Tif2Tiles(string tifFile, string outputDir, int minZoom, int maxZoom)
                     Band inBand1 = dataset.GetRasterBand(1);
                     Band inBand2 = dataset.GetRasterBand(2);
                     Band inBand3 = dataset.GetRasterBand(3);
-                    int[] band1BuffData = new int[TILE_SIZE * TILE_SIZE * GdalConst.GDT_Int32];
-                    int[] band2BuffData = new int[TILE_SIZE * TILE_SIZE * GdalConst.GDT_Int32];
-                    int[] band3BuffData = new int[TILE_SIZE * TILE_SIZE * GdalConst.GDT_Int32];
-                    inBand1.ReadRaster(offsetX, offsetY, blockXSize, blockYSize, band1BuffData, imageXBuf, imageYBuf, GdalConst.GDT_Int32, 0);
-                    inBand2.ReadRaster(offsetX, offsetY, blockXSize, blockYSize, band2BuffData, imageXBuf, imageYBuf, GdalConst.GDT_Int32, 0);
-                    inBand3.ReadRaster(offsetX, offsetY, blockXSize, blockYSize, band3BuffData, imageXBuf, imageYBuf, GdalConst.GDT_Int32, 0);
+                    int[] band1BuffData = new int[TILE_SIZE * TILE_SIZE * GdalConst.GDT_UInt64];
+                    int[] band2BuffData = new int[TILE_SIZE * TILE_SIZE * GdalConst.GDT_UInt64];
+                    int[] band3BuffData = new int[TILE_SIZE * TILE_SIZE * GdalConst.GDT_UInt64];
+                    inBand1.ReadRaster(offsetX, offsetY, blockXSize, blockYSize, band1BuffData, imageXBuf, imageYBuf, GdalConst.GDT_UInt64, 0);
+                    inBand2.ReadRaster(offsetX, offsetY, blockXSize, blockYSize, band2BuffData, imageXBuf, imageYBuf, GdalConst.GDT_UInt64, 0);
+                    inBand3.ReadRaster(offsetX, offsetY, blockXSize, blockYSize, band3BuffData, imageXBuf, imageYBuf, GdalConst.GDT_UInt64, 0);
                     //  8. 将切片数据写入文件
                     // 使用gdal的MEM驱动在内存中创建一块区域存储图像数组
                     Driver memDriver = Gdal.GetDriverByName("MEM");
-                    Dataset msmDS = memDriver.Create("msmDS", 256, 256, 4, DataType.GDT_Int32, null);
+                    Dataset msmDS = memDriver.Create("msmDS", 256, 256, 4, DataType.GDT_UInt64, null);
                     Band dstBand1 = msmDS.GetRasterBand(1);
                     Band dstBand2 = msmDS.GetRasterBand(2);
                     Band dstBand3 = msmDS.GetRasterBand(3);
                     // 设置alpha波段数据,实现背景透明
                     Band alphaBand = msmDS.GetRasterBand(4);
-                    int[] alphaData = new int[256 * 256 * GdalConst.GDT_Int32];
+                    int[] alphaData = new int[256 * 256 * GdalConst.GDT_UInt64];
                     for (int index = 0; index < alphaData.Length; index++)
                     {
                         if (band1BuffData[index] > 0)
@@ -146,11 +164,17 @@ void Tif2Tiles(string tifFile, string outputDir, int minZoom, int maxZoom)
                         }
                     }
                     // 写各个波段数据
-                    dstBand1.WriteRaster(imageOffsetX, imageOffsetY, imageXBuf, imageYBuf, band1BuffData, imageXBuf, imageYBuf, GdalConst.GDT_Int32, 0);
-                    dstBand2.WriteRaster(imageOffsetX, imageOffsetY, imageXBuf, imageYBuf, band2BuffData, imageXBuf, imageYBuf, GdalConst.GDT_Int32, 0);
-                    dstBand3.WriteRaster(imageOffsetX, imageOffsetY, imageXBuf, imageYBuf, band3BuffData, imageXBuf, imageYBuf, GdalConst.GDT_Int32, 0);
-                    alphaBand.WriteRaster(imageOffsetX, imageOffsetY, imageXBuf, imageYBuf, alphaData, imageXBuf, imageYBuf, GdalConst.GDT_Int32, 0);
-                    String pngPath = Path.Combine(outputDir, +zoom + "-" + col + "-" + row + ".png");
+                    dstBand1.WriteRaster(imageOffsetX, imageOffsetY, imageXBuf, imageYBuf, band1BuffData, imageXBuf, imageYBuf, GdalConst.GDT_UInt64, 0);
+                    dstBand2.WriteRaster(imageOffsetX, imageOffsetY, imageXBuf, imageYBuf, band2BuffData, imageXBuf, imageYBuf, GdalConst.GDT_UInt64, 0);
+                    dstBand3.WriteRaster(imageOffsetX, imageOffsetY, imageXBuf, imageYBuf, band3BuffData, imageXBuf, imageYBuf, GdalConst.GDT_UInt64, 0);
+                    alphaBand.WriteRaster(imageOffsetX, imageOffsetY, imageXBuf, imageYBuf, alphaData, imageXBuf, imageYBuf, GdalConst.GDT_UInt64, 0);
+
+                    if (!Directory.Exists(Path.Combine(outputDir, zoom.ToString())))
+                        Directory.CreateDirectory(Path.Combine(outputDir, zoom.ToString()));
+                    if (!Directory.Exists(Path.Combine(outputDir, zoom.ToString(), col.ToString())))
+                        Directory.CreateDirectory(Path.Combine(outputDir, zoom.ToString(), col.ToString()));
+
+                    var pngPath = Path.Combine(outputDir, zoom.ToString(), col.ToString(), row + ".png");
                     // 使用PNG驱动将内存中的图像数组写入文件
                     Driver pngDriver = Gdal.GetDriverByName("PNG");
                     Dataset pngDs = pngDriver.CreateCopy(pngPath, msmDS, 0, null, null, null);
@@ -166,7 +190,6 @@ void Tif2Tiles(string tifFile, string outputDir, int minZoom, int maxZoom)
     {
         // 释放并删除临时文件
         dataset.Dispose();
-        File.Delete(tmpFile);
     }
 }
 /**
@@ -179,25 +202,10 @@ void Tif2Tiles(string tifFile, string outputDir, int minZoom, int maxZoom)
  */
 int[] coordinates2tile(double lng, double lat, int zoom)
 {
-    int x = (int)Math.Floor((lng + 180) / 360 * (1 << zoom));
-    int y = (int)Math.Floor((1 - Math.Log(Math.Tan(ToRadians(lat)) + 1 / Math.Cos(ToRadians(lat))) / Math.PI) / 2 * (1 << zoom));
-    if (x < 0)
-    {
-        x = 0;
-    }
-    if (x >= (1 << zoom))
-    {
-        x = ((1 << zoom) - 1);
-    }
-    if (y < 0)
-    {
-        y = 0;
-    }
-    if (y >= (1 << zoom))
-    {
-        y = ((1 << zoom) - 1);
-    }
-    return new int[] { x, y };
+    var n = Math.Pow(2, zoom);
+    var tileX = (lng + 180) / 360 * n;
+    var tileY = (1 - (Math.Log(Math.Tan(ToRadians(lat)) + (1 / Math.Cos(ToRadians(lat)))) / Math.PI)) / 2 * n;
+    return new int[] { (int)Math.Floor(tileX), (int)Math.Floor(tileY) };
 }
 /**
  * 瓦片坐标转经度
