@@ -21,7 +21,7 @@ int WGS_84_EGPS_CODE = 4326;
 
 GdalBase.ConfigureAll();
 
-Tif2Tiles("G:\\demo\\3=tdom-f.tif", "data", 10, 18);
+Tif2Tiles("G:\\demo\\3=tdom-f.tif", "data", 10, 20);
 
 /**
  * Tif 切片
